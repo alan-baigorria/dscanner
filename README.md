@@ -6,6 +6,14 @@
 
 dScanner consolida múltiples herramientas de reconocimiento en un solo comando para la fase inicial de pentesting web.
 
+## 🚀 Instalación
+
+### Opción 1: Descarga directa (Recomendado)
+```bash Descargar el script
+curl -o dscanner.sh https://raw.githubusercontent.com/alan-baigorria/dscanner/main/dscanner.sh
+chmod +x dscanner.shEjecutar
+./dscanner.sh google.com
+```
 ## Desarrollo
 
 Herramienta conceptualizada y diseñada para automatizar reconocimiento web 
