@@ -1,8 +1,8 @@
 #!/bin/bash
 # dScanner - Escaneo rápido y compacto
-# Uso: bash dscanner.sh <dominio> [opciones]
+# Uso: bash dscanner.sh <dominio> [-e]
 
-set -eo pipefail  # Removido 'u' para evitar errores con variables no definidas
+set -eo pipefail
 
 # Colores minimalistas
 readonly G='\033[0;32m'  # Green
@@ -13,29 +13,28 @@ readonly NC='\033[0m'    # No Color
 
 # Config
 TARGET="${1:-}"
-VERBOSE=false
 EXPORT_TXT=false
-TIMEOUT=10
 
 # Parsear opciones
-shift 2>/dev/null || true
-while [ $# -gt 0 ]; do
-    case "$1" in
-        -v|--verbose) VERBOSE=true ;;
-        -e|--export) EXPORT_TXT=true ;;
-        -t|--timeout) TIMEOUT="$2"; shift ;;
-        *) echo -e "${R}Opción desconocida: $1${NC}" ;;
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -e|--export)
+            EXPORT_TXT=true
+            shift
+            ;;
+        *)
+            if [ -z "$TARGET" ]; then
+                TARGET="$1"
+            fi
+            shift
+            ;;
     esac
-    shift 2>/dev/null || true
 done
 
 # Validación
 if [ -z "$TARGET" ]; then
     echo -e "${R}Error: Dominio requerido${NC}"
-    echo "Uso: $0 <dominio> [-v] [-e] [-t timeout]"
-    echo "  -v, --verbose  : Modo detallado"
-    echo "  -e, --export   : Exportar resultado a archivo TXT"
-    echo "  -t, --timeout  : Timeout en segundos (default: 10)"
+    echo "Uso: $0 <dominio> [-e]"
     exit 1
 fi
 
@@ -48,10 +47,8 @@ REPORT="$(echo "$TARGET" | sed 's/\./-/g').txt"
 ############################
 get_root_domain() {
     local domain="$1"
-    # Remove protocol if present
     domain=$(echo "$domain" | sed 's|https\?://||' | sed 's|/.*||')
     
-    # Handle multi-part TLDs like .co.uk, .com.ar, etc.
     if echo "$domain" | grep -qE '\.(co\.|com\.|org\.|net\.|gov\.|edu\.)[a-z]{2}$'; then
         echo "$domain" | awk -F. '{print $(NF-2)"."$(NF-1)"."$NF}'
     else
@@ -65,45 +62,42 @@ echo -e "${Y}🔍 Scanner - UGR: ${G}${TARGET}${NC}"
 echo -e "${C}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 
 ############################
-# DNS - Resolución rápida
+# DNS - Resolución IPv4 e IPv6
 ############################
-IPS=$(timeout "$TIMEOUT" dig +short +tries=2 +time=2 A "$TARGET" 2>/dev/null | grep -E '^[0-9]+\.' | paste -sd ',' - || echo "No resuelto")
-echo -e "[IPS - dig]: ${G}${IPS}${NC}"
+echo -e "[DNS RESOLUTION]"
+IPS=$(dig +short +tries=2 +time=2 A "$TARGET" 2>/dev/null | grep -E '^[0-9]+\.' | paste -sd ',' - || echo "No resuelto")
+IPS6=$(dig +short +tries=2 +time=2 AAAA "$TARGET" 2>/dev/null | grep -E '^[0-9a-fA-F:]+' | paste -sd ',' - || echo "")
+echo -e "  IPv4: ${G}${IPS}${NC}"
+[ -n "$IPS6" ] && echo -e "  IPv6: ${G}${IPS6}${NC}"
 
 ############################
-# PUERTOS - Escaneo rápido (en paralelo con otras tareas)
+# INICIAR NMAP EN SEGUNDO PLANO INMEDIATAMENTE
 ############################
-# Iniciar nmap en background para ganar tiempo
-nmap -T5 --open -F --max-retries 1 "$TARGET" 2>/dev/null > /tmp/nmap_$.tmp &
+nmap -T4 --open -sV -F --max-retries 1 "$TARGET" 2>/dev/null > /tmp/nmap_$.tmp &
 NMAP_PID=$!
 
 ############################
 # HTTPX - Tecnologías y info web
 ############################
-echo
-# Verificar si httpx está instalado
+echo -e "\n[WEB TECHNOLOGIES]"
 if command -v httpx &> /dev/null; then
-    HTTPX_OUTPUT=$(echo "$TARGET" | httpx -silent -td -server -title -status-code -cl -timeout "$TIMEOUT" 2>/dev/null || echo "")
+    HTTPX_OUTPUT=$(echo "$TARGET" | httpx -silent -td -server -title -status-code -cl -timeout 10 2>/dev/null || echo "")
     
     if [ -n "$HTTPX_OUTPUT" ]; then
-        # Extraer tecnologías detectadas
         TECH=$(echo "$HTTPX_OUTPUT" | grep -oP '\[.*?\]' | tail -1 | tr -d '[]' || echo "")
-        # Extraer servidor
         SERVER=$(echo "$HTTPX_OUTPUT" | grep -oP 'server:\K[^\s]+' || echo "")
-        # Extraer status code
         STATUS=$(echo "$HTTPX_OUTPUT" | grep -oP '\[\K[0-9]{3}(?=\])' | head -1 || echo "")
+        TITLE=$(echo "$HTTPX_OUTPUT" | grep -oP 'title:\K[^\]]+' | head -1 | xargs || echo "")
         
-        echo -e "[WEB INFO - httpx]:"
         [ -n "$STATUS" ] && echo -e "  Status: ${G}$STATUS${NC}"
+        [ -n "$TITLE" ] && echo -e "  Title: ${G}$TITLE${NC}"
         [ -n "$SERVER" ] && echo -e "  Server: ${G}$SERVER${NC}"
         [ -n "$TECH" ] && echo -e "  Tech: ${G}$TECH${NC}"
     else
-        echo -e "[WEB INFO - httpx]: ${Y}No response${NC}"
+        echo -e "  ${Y}No response${NC}"
     fi
 else
-    # Fallback a curl si httpx no está instalado
-    echo -e "[WEB INFO - curl fallback]:"
-    HEADERS=$(timeout "$TIMEOUT" curl -sI "https://$TARGET" 2>/dev/null || timeout "$TIMEOUT" curl -sI "http://$TARGET" 2>/dev/null || echo "")
+    HEADERS=$(curl -sI "https://$TARGET" 2>/dev/null || curl -sI "http://$TARGET" 2>/dev/null || echo "")
     
     if [ -n "$HEADERS" ]; then
         STATUS=$(echo "$HEADERS" | head -1 | grep -oP '\d{3}' | head -1 || echo "")
@@ -116,99 +110,183 @@ else
     else
         echo -e "  ${Y}No response${NC}"
     fi
-    
-    echo -e "  ${Y}💡 Tip: Install httpx for better tech detection${NC}"
-    echo -e "  ${C}   go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest${NC}"
 fi
 
 ############################
-# PUERTOS - Recolectar resultado de nmap
+# ROBOTS.TXT y SITEMAP.XML - CORREGIDO
 ############################
-echo
-wait $NMAP_PID 2>/dev/null || true
-NMAP_OUTPUT=$(cat /tmp/nmap_$.tmp 2>/dev/null || echo "")
-rm -f /tmp/nmap_$.tmp
-PORTS=$(echo "$NMAP_OUTPUT" | grep 'open' | awk -F'/' '{print $1}' | paste -sd ',' -)
-echo -e "[PUERTOS ABIERTOS - nmap]: ${G}${PORTS:-Ninguno}${NC}"
+echo -e "\n[CONTENT DISCOVERY]"
+
+# Probar robots.txt - DETECCIÓN MEJORADA
+ROBOTS_FOUND=false
+ROBOTS_URLS=("https://$TARGET/robots.txt" "http://$TARGET/robots.txt" "https://www.$TARGET/robots.txt" "http://www.$TARGET/robots.txt")
+ROBOTS_CONTENT=""
+
+for url in "${ROBOTS_URLS[@]}"; do
+    # Verificar primero el código de estado
+    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L -A "Mozilla/5.0" "$url" 2>/dev/null || echo "000")
+    
+    if [ "$HTTP_STATUS" = "200" ]; then
+        ROBOTS_CONTENT=$(curl -sL -A "Mozilla/5.0" "$url" 2>/dev/null)
+        # Verificar que el contenido tenga líneas válidas de robots.txt
+        if echo "$ROBOTS_CONTENT" | grep -qiE "^(user-agent|disallow|allow|sitemap| crawl-delay):" ; then
+            ROBOTS_FOUND=true
+            ROBOTS_URL="$url"
+            break
+        fi
+    fi
+done
+
+if [ "$ROBOTS_FOUND" = true ]; then
+    echo -e "  ${G}robots.txt encontrado${NC}"
+    
+    # Extraer rutas de Disallow (excluyendo solo "/")
+    DISALLOW_PATHS=$(echo "$ROBOTS_CONTENT" | grep -i '^disallow:' | cut -d: -f2- | sed 's/^[[:space:]]*//' | grep -v '^[[:space:]]*$' | grep -v '^/$' | head -10)
+    
+    if [ -n "$DISALLOW_PATHS" ]; then
+        echo -e "  ${Y}Rutas bloqueadas:${NC}"
+        echo "$DISALLOW_PATHS" | while read -r path; do
+            [ -n "$path" ] && echo -e "    ${C}➜${NC} $path"
+        done
+    else
+        echo -e "  ${Y}No hay rutas específicas bloqueadas${NC}"
+    fi
+else
+    echo -e "  ${Y}robots.txt no encontrado${NC}"
+fi
+
+# Buscar sitemap - DETECCIÓN MEJORADA
+SITEMAP_FOUND=false
+
+# Primero buscar sitemap en robots.txt si se encontró
+if [ "$ROBOTS_FOUND" = true ]; then
+    SITEMAP_FROM_ROBOTS=$(echo "$ROBOTS_CONTENT" | grep -i '^sitemap:' | cut -d: -f2- | sed 's/^[[:space:]]*//' | head -1)
+    if [ -n "$SITEMAP_FROM_ROBOTS" ]; then
+        # Verificar que el sitemap sea accesible
+        SITEMAP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L -A "Mozilla/5.0" "$SITEMAP_FROM_ROBOTS" 2>/dev/null || echo "000")
+        if [ "$SITEMAP_STATUS" = "200" ]; then
+            SITEMAP_URL="$SITEMAP_FROM_ROBOTS"
+            SITEMAP_FOUND=true
+        fi
+    fi
+fi
+
+# Si no se encontró en robots.txt, probar URLs directas
+if [ "$SITEMAP_FOUND" = false ]; then
+    SITEMAP_URLS=("https://$TARGET/sitemap.xml" "http://$TARGET/sitemap.xml" "https://www.$TARGET/sitemap.xml" "http://www.$TARGET/sitemap.xml")
+    
+    for url in "${SITEMAP_URLS[@]}"; do
+        SITEMAP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L -A "Mozilla/5.0" "$url" 2>/dev/null || echo "000")
+        if [ "$SITEMAP_STATUS" = "200" ]; then
+            SITEMAP_URL="$url"
+            SITEMAP_FOUND=true
+            break
+        fi
+    done
+fi
+
+if [ "$SITEMAP_FOUND" = true ]; then
+    echo -e "  ${G}sitemap.xml encontrado${NC}"
+else
+    echo -e "  ${Y}sitemap.xml no encontrado${NC}"
+fi
 
 ############################
 # COOKIES - Tabla ASCII
 ############################
-echo
-echo -e "[COOKIES - curl]:"
+echo -e "\n[COOKIE ANALYSIS]"
 
-# Obtener headers con cookies (intentar HTTPS primero con user-agent y follow redirects)
-COOKIE_HEADERS=$(timeout "$TIMEOUT" curl -sL -D - -o /dev/null -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" "https://$TARGET" 2>/dev/null | grep -i "^set-cookie:" || echo "")
+COOKIE_HEADERS=""
+URLS_TO_TEST=("https://$TARGET" "http://$TARGET" "https://www.$TARGET" "http://www.$TARGET")
+
+for url in "${URLS_TO_TEST[@]}"; do
+    TEMP_HEADERS=$(curl -sL -I -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" "$url" 2>/dev/null | grep -i "^set-cookie:" || echo "")
+    if [ -n "$TEMP_HEADERS" ]; then
+        COOKIE_HEADERS="$TEMP_HEADERS"
+        break
+    fi
+done
 
 if [ -z "$COOKIE_HEADERS" ]; then
-    # Si falla HTTPS, intentar HTTP
-    COOKIE_HEADERS=$(timeout "$TIMEOUT" curl -sL -D - -o /dev/null -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" "http://$TARGET" 2>/dev/null | grep -i "^set-cookie:" || echo "")
-fi
-
-if [ -z "$COOKIE_HEADERS" ]; then
-    # Último intento: con www
-    COOKIE_HEADERS=$(timeout "$TIMEOUT" curl -sL -D - -o /dev/null -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" "https://www.$TARGET" 2>/dev/null | grep -i "^set-cookie:" || echo "")
+    for url in "${URLS_TO_TEST[@]}"; do
+        TEMP_HEADERS=$(curl -sL -D - -o /dev/null -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" "$url" 2>/dev/null | grep -i "^set-cookie:" || echo "")
+        if [ -n "$TEMP_HEADERS" ]; then
+            COOKIE_HEADERS="$TEMP_HEADERS"
+            break
+        fi
+    done
 fi
 
 if [ -n "$COOKIE_HEADERS" ]; then
-    # Encabezado de la tabla
+    echo -e "  ${G}Cookies detectadas${NC}"
+    
     printf "  ┌─────────────────────────┬──────────┬────────┬──────────┐\n"
     printf "  │ %-23s │ HttpOnly │ Secure │ SameSite │\n" "Name"
     printf "  ├─────────────────────────┼──────────┼────────┼──────────┤\n"
     
-    # Procesar cada cookie
     echo "$COOKIE_HEADERS" | while IFS= read -r cookie_line; do
-        # Extraer todo después de "Set-Cookie: "
         cookie_data=$(echo "$cookie_line" | sed 's/^[Ss]et-[Cc]ookie: *//')
-        
-        # Extraer nombre de la cookie (máximo 23 caracteres)
         cookie_name=$(echo "$cookie_data" | cut -d'=' -f1 | xargs | cut -c1-23)
         
-        # Buscar atributos de seguridad importantes
         httponly="No"
         secure="No"
         samesite="None"
         
-        if echo "$cookie_data" | grep -iq "httponly"; then
-            httponly="Yes"
-        fi
-        
-        if echo "$cookie_data" | grep -iq "secure"; then
-            secure="Yes"
-        fi
+        echo "$cookie_data" | grep -iq "httponly" && httponly="Yes"
+        echo "$cookie_data" | grep -iq "secure" && secure="Yes"
         
         samesite_val=$(echo "$cookie_data" | grep -ioP 'samesite=\K[^;]+' | xargs || echo "")
-        if [ -n "$samesite_val" ]; then
-            samesite="$samesite_val"
-        fi
+        [ -n "$samesite_val" ] && samesite="$samesite_val"
         
-        # Imprimir fila de la tabla
         printf "  │ %-23s │ %-8s │ %-6s │ %-8s │\n" "$cookie_name" "$httponly" "$secure" "$samesite"
     done
     
-    # Footer de la tabla
     printf "  └─────────────────────────┴──────────┴────────┴──────────┘\n"
 else
     echo -e "  ${Y}No se detectaron cookies${NC}"
 fi
 
 ############################
+# ESPERAR Y MOSTRAR RESULTADOS DE NMAP
+############################
+echo -e "\n[PORT SCAN RESULTS]"
+wait $NMAP_PID 2>/dev/null
+NMAP_OUTPUT=$(cat /tmp/nmap_$.tmp 2>/dev/null || echo "")
+rm -f /tmp/nmap_$.tmp
+
+if [ -n "$NMAP_OUTPUT" ] && echo "$NMAP_OUTPUT" | grep -q "open"; then
+    printf "  ┌────────┬────────┬────────────────────────────────────────┐\n"
+    printf "  │ Puerto │ Estado │ Servicio/Versión                       │\n"
+    printf "  ├────────┼────────┼────────────────────────────────────────┤\n"
+    
+    echo "$NMAP_OUTPUT" | grep 'open' | while read -r line; do
+        PORT=$(echo "$line" | awk -F'/' '{print $1}')
+        STATE=$(echo "$line" | awk '{print $2}')
+        SERVICE=$(echo "$line" | awk '{$1=$2=$3=""; print $0}' | sed 's/^ *//' | xargs)
+        SERVICE=$(echo "$SERVICE" | cut -c1-38)
+        
+        printf "  │ %-6s │ %-6s │ %-38s │\n" "$PORT" "$STATE" "$SERVICE"
+    done
+    
+    printf "  └────────┴────────┴────────────────────────────────────────┘\n"
+else
+    echo -e "  ${Y}No se encontraron puertos abiertos${NC}"
+fi
+
+############################
 # WHOIS - Solo para dominios raíz
 ############################
-echo
+echo -e "\n[DOMAIN INFORMATION]"
 ROOT_DOMAIN=$(get_root_domain "$TARGET")
 
-# Solo ejecutar WHOIS si es el dominio raíz (no subdominios)
 if [ "$TARGET" = "$ROOT_DOMAIN" ]; then
-    echo -e "[WHOIS]"
-    WHOIS_DATA=$(timeout "$TIMEOUT" whois "$ROOT_DOMAIN" 2>/dev/null || echo "")
+    WHOIS_DATA=$(whois "$ROOT_DOMAIN" 2>/dev/null || echo "")
 
     REGISTRAR=$(echo "$WHOIS_DATA" | grep -im 1 'registrar:' | cut -d: -f2- | xargs || echo "N/A")
     CREATED=$(echo "$WHOIS_DATA" | grep -im 1 'creation date:' | cut -d: -f2- | awk '{print $1}' | sed 's/T.*//' || echo "N/A")
     EXPIRES=$(echo "$WHOIS_DATA" | grep -im 1 'expir' | cut -d: -f2- | awk '{print $1}' | sed 's/T.*//' || echo "N/A")
     NAMESERVERS=$(echo "$WHOIS_DATA" | grep -iE '^name server:' | awk '{print $NF}' | paste -sd ',' - || echo "N/A")
 
-    # Convertir fechas a DD/MM/YYYY
     if [[ "$CREATED" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
         CREATED=$(echo "$CREATED" | awk -F'-' '{print $3"/"$2"/"$1}')
     fi
@@ -219,117 +297,86 @@ if [ "$TARGET" = "$ROOT_DOMAIN" ]; then
     echo -e "  Registrar: ${G}$REGISTRAR${NC}"
     echo -e "  Registro - Vencimiento: ${G}${CREATED:-N/A} - ${EXPIRES:-N/A}${NC}"
     echo -e "  Name Server(s): ${C}${NAMESERVERS:-N/A}${NC}"
+else
+    echo -e "  ${Y}Subdominio detectado - WHOIS no disponible${NC}"
 fi
 
 ############################
-# Exportar a TXT limpio
+# Exportar a TXT solo si se solicita
 ############################
 if [ "$EXPORT_TXT" = true ]; then
-{
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🔍 Scanner - UGR: $TARGET"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo
+    echo -e "\n[EXPORT]"
+    {
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🔍 Scanner - UGR: $TARGET"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo
 
-    # Detección de Cloudflare
-    IS_CLOUDFLARE=false
-    if echo "$TECH" | grep -qi "cloudflare" || echo "$SERVER" | grep -qi "cloudflare"; then
-        IS_CLOUDFLARE=true
-    fi
+        echo "Las IPs son:"
+        echo "  IPv4: ${IPS:-No resuelto}"
+        [ -n "$IPS6" ] && echo "  IPv6: ${IPS6}"
 
-    # IPs (modificar último octeto si es Cloudflare)
-    if [ "$IS_CLOUDFLARE" = true ] && [ -n "$IPS" ] && [ "$IPS" != "No resuelto" ]; then
-        # Reemplazar último octeto de cada IP con 1/255
-        IPS_MODIFIED=$(echo "$IPS" | sed 's/\.[0-9]\+\(,\|$\)/\.1\/255\1/g')
-        echo "Las IPs son: ${IPS_MODIFIED} (Cloudflare WAF detectado)"
-    else
-        echo "Las IPs son: ${IPS:-No resuelto}"
-    fi
-
-    # Puertos abiertos
-    echo "Los puertos abiertos son: ${PORTS:-Ninguno}"
-
-    # Tecnologías
-    if [ -n "$TECH" ]; then
-        echo "Las tecnologías utilizadas son: $TECH"
-    elif [ -n "$SERVER" ]; then
-        echo "Server detectado: $SERVER"
-    else
-        echo "Las tecnologías utilizadas son: No detectadas"
-    fi
-
-    # Cookies con análisis de vulnerabilidades
-    echo
-    echo "Cookies presentes son:"
-    if [ -n "$COOKIE_HEADERS" ]; then
-        VULNERABLE_COOKIES=()
-        
-        # Analizar cada cookie
-        while IFS= read -r cookie_line; do
-            cookie_data=$(echo "$cookie_line" | sed 's/^[Ss]et-[Cc]ookie: *//')
-            cookie_name=$(echo "$cookie_data" | cut -d'=' -f1 | xargs)
-            
-            # Verificar atributos de seguridad
-            httponly=0
-            secure=0
-            samesite="none"
-            
-            if echo "$cookie_data" | grep -iq "httponly"; then
-                httponly=1
-            fi
-            
-            if echo "$cookie_data" | grep -iq "secure"; then
-                secure=1
-            fi
-            
-            samesite_val=$(echo "$cookie_data" | grep -ioP 'samesite=\K[^;]+' | xargs || echo "")
-            if [ -n "$samesite_val" ]; then
-                samesite="$samesite_val"
-            fi
-            
-            # Detectar cookies REALMENTE vulnerables (críticas)
-            # Solo si falta httponly O secure (no samesite solo)
-            if [ "$httponly" -eq 0 ] || [ "$secure" -eq 0 ]; then
-                issues=()
-                [ "$httponly" -eq 0 ] && issues+=("sin HttpOnly - vulnerable a XSS")
-                [ "$secure" -eq 0 ] && issues+=("sin Secure - se envía sin cifrar")
-                [ "$samesite" = "none" ] && [ "$secure" -eq 1 ] && [ "$httponly" -eq 1 ] && issues+=("SameSite=None - posible CSRF")
-                
-                VULNERABLE_COOKIES+=("  - $cookie_name [${issues[*]}]")
-            fi
-            
-            echo "  - $cookie_name"
-        done <<< "$COOKIE_HEADERS"
-        
-        # Mostrar cookies vulnerables si existen
-        if [ ${#VULNERABLE_COOKIES[@]} -gt 0 ]; then
-            echo
-            echo "⚠️  Cookies con problemas de seguridad:"
-            printf '%s\n' "${VULNERABLE_COOKIES[@]}"
+        echo
+        echo "Puertos y servicios detectados:"
+        if [ -n "$NMAP_OUTPUT" ] && echo "$NMAP_OUTPUT" | grep -q "open"; then
+            echo "$NMAP_OUTPUT" | grep 'open' | while read -r line; do
+                PORT=$(echo "$line" | awk -F'/' '{print $1}')
+                SERVICE=$(echo "$line" | awk '{$1=$2=$3=""; print $0}' | sed 's/^ *//' | xargs)
+                echo "  Puerto $PORT: $SERVICE"
+            done
         else
-            echo
-            echo "✅ Todas las cookies tienen configuración segura"
+            echo "  Ninguno detectado"
         fi
-    else
-        echo "  Ninguna"
-    fi
 
-    # WHOIS (solo si es dominio raíz)
-    echo
-    if [ "$TARGET" = "$ROOT_DOMAIN" ]; then
-        if [ "${REGISTRAR:-N/A}" != "N/A" ]; then
-            echo "El registro fue hecho por $REGISTRAR el ${CREATED:-N/A} y vence el ${EXPIRES:-N/A}"
-            echo "Los name server(s) son: ${NAMESERVERS:-N/A}"
+        echo
+        echo "Tecnologías detectadas:"
+        [ -n "$STATUS" ] && echo "  Status: $STATUS"
+        [ -n "$TITLE" ] && echo "  Title: $TITLE"
+        [ -n "$SERVER" ] && echo "  Server: $SERVER"
+        [ -n "$TECH" ] && echo "  Tech: $TECH"
+
+        echo
+        echo "Análisis de contenido:"
+        if [ "$ROBOTS_FOUND" = true ]; then
+            echo "  robots.txt: Encontrado"
+            if [ -n "$DISALLOW_PATHS" ]; then
+                echo "  Rutas bloqueadas:"
+                echo "$DISALLOW_PATHS" | while read -r path; do
+                    [ -n "$path" ] && echo "    - $path"
+                done
+            fi
         else
-            echo "Información WHOIS no disponible."
+            echo "  robots.txt: No encontrado"
         fi
-    fi
+        [ "$SITEMAP_FOUND" = true ] && echo "  sitemap.xml: Encontrado"
 
-    echo
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-} > "$REPORT"
-    echo -e "\n${C}📄 Reporte exportado: ${REPORT}${NC}"
+        echo
+        echo "Cookies:"
+        if [ -n "$COOKIE_HEADERS" ]; then
+            echo "$COOKIE_HEADERS" | while IFS= read -r cookie_line; do
+                cookie_name=$(echo "$cookie_line" | sed 's/^[Ss]et-[Cc]ookie: *//' | cut -d'=' -f1 | xargs)
+                echo "  - $cookie_name"
+            done
+        else
+            echo "  No se detectaron cookies"
+        fi
+
+        if [ "$TARGET" = "$ROOT_DOMAIN" ]; then
+            echo
+            echo "Información del dominio:"
+            echo "  Registrar: $REGISTRAR"
+            echo "  Fecha de registro: $CREATED"
+            echo "  Fecha de vencimiento: $EXPIRES"
+            echo "  Nameservers: $NAMESERVERS"
+        fi
+
+        echo
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    } > "$REPORT"
+    echo -e "  ${C}Reporte exportado: ${REPORT}${NC}"
 fi
 
 # Footer
-echo -e "\n${C}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+echo -e "\n${C}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${G}Escaneo completado para: ${TARGET}${NC}"
+echo -e "${C}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
