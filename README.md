@@ -8,10 +8,15 @@ dScanner consolida múltiples herramientas de reconocimiento en un solo comando 
 
 ## 🚀 Instalación
 
+Dependencias requeridas: curl dnsutils nmap whois golang httpx
 
-Instalación de dependencias
+Instalación de dependencias:
 ```bash
-sudo apt install dnsutils nmap curl whois httpx
+sudo apt install -y curl dnsutils nmap whois golang
+go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc
+source ~/.bashrc
+
 ```
 
 ```bash Descargar el script
@@ -27,6 +32,7 @@ para implementación técnica y optimización.
 
 **Cosas que me gustaría hacer:**
 - Reescribirlo en Python, agregar algo de certificado SSL
+- Bypassear WAFS, tengo que sentarme y pedir las cookies de los distintos WAF pero conozco el de Cloudflare solamente
 
 **Características:**
 - ✅ Resolución DNS con detección de subdominios
