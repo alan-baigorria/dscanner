@@ -22,7 +22,7 @@ source ~/.bashrc
 ```bash Descargar el script
 curl -o dscanner.sh https://raw.githubusercontent.com/alan-baigorria/dscanner/main/dscanner.sh
 chmod +x dscanner.shEjecutar
-./dscanner.sh google.com
+./bash dscanner.sh google.com
 ```
 ## Desarrollo
 
