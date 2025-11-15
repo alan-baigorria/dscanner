@@ -18,10 +18,7 @@ chmod +x dscanner.shEjecutar
 
 Herramienta conceptualizada y diseñada para automatizar reconocimiento web 
 en auditorías de seguridad. Desarrollada en bash con asistencia de Claude AI 
-(Anthropic) para implementación técnica y optimización.
-
-**Autor:** Alan B. - Proyecto académico.  
-**Asistencia técnica:** Claude AI
+para implementación técnica y optimización.
 
 
 **Características:**
@@ -42,6 +39,7 @@ en auditorías de seguridad. Desarrollada en bash con asistencia de Claude AI
 | Cookies | curl | Analizar atributos de seguridad |
 | Registro | whois | Información del registrador |
 
+
 ## Instalación
 
 # Escaneo básico
@@ -50,8 +48,6 @@ en auditorías de seguridad. Desarrollada en bash con asistencia de Claude AI
 # Con export a TXT
 ./dscanner.sh ejemplo.com -e
 
-# Timeout personalizado
-./dscanner.sh ejemplo.com -t 15 -e
 
 # Ejemplo de salida:
 <img width="756" height="559" alt="image" src="https://github.com/user-attachments/assets/2f261235-c396-424e-b47b-54eea76460bf" />
