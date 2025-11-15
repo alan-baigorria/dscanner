@@ -64,7 +64,7 @@ para implementación técnica y optimización.
 ./dscanner.sh ejemplo.com -e
 
 
-#Versiones
+# Versiones
 ### 15/11/2025 - v1.5
 - Agregué el scrapeo de robots.txt, sitemap.xml
 - Cambié la configuración del nmap a -sV así se puede ver más información de cada puerto
