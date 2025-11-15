@@ -25,6 +25,8 @@ Herramienta conceptualizada y diseñada para automatizar reconocimiento web
 en auditorías de seguridad. Desarrollada en bash con asistencia de Claude AI 
 para implementación técnica y optimización.
 
+**Cosas que me gustaría hacer:**
+- Reescribirlo en Python, agregar algo de certificado SSL
 
 **Características:**
 - ✅ Resolución DNS con detección de subdominios
@@ -32,6 +34,8 @@ para implementación técnica y optimización.
 - ✅ Detección de tecnologías (httpx/curl)
 - ✅ Análisis de seguridad de cookies
 - ✅ Información WHOIS (dominios raíz)
+- ✅ Analisis de robots.txt & sitemap.xml
+- ✅ Analisis de cookies (
 - ✅ Export a TXT con análisis de vulnerabilidades
 
 ## Arquitectura
