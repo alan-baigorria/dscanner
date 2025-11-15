@@ -58,7 +58,7 @@ get_root_domain() {
 
 # Header
 echo -e "\n${C}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${Y}🔍 Scanner - UGR: ${G}${TARGET}${NC}"
+echo -e "${Y}🔍 Scanner: ${G}${TARGET}${NC}"
 echo -e "${C}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 
 ############################
