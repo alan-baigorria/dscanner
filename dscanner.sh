@@ -2,7 +2,7 @@
 # dScanner - Escaneo rápido y compacto
 # Uso: bash dscanner.sh <dominio> [-e]
 
-set -eo pipefail
+set -e
 
 # Colores minimalistas
 readonly G='\033[0;32m'  # Green
@@ -73,15 +73,18 @@ echo -e "  IPv4: ${G}${IPS}${NC}"
 ############################
 # INICIAR NMAP EN SEGUNDO PLANO INMEDIATAMENTE
 ############################
-nmap -T4 --open -sV -F --max-retries 1 "$TARGET" 2>/dev/null > /tmp/nmap_$.tmp &
+
+nmap -T4 --open -sV -F --max-retries 1 "$TARGET" 2>/dev/null > /tmp/nmap_$$.tmp &
 NMAP_PID=$!
 
 ############################
 # HTTPX - Tecnologías y info web
 ############################
 echo -e "\n[WEB TECHNOLOGIES]"
+TECH="" SERVER="" STATUS="" TITLE=""
+
 if command -v httpx &> /dev/null; then
-    HTTPX_OUTPUT=$(echo "$TARGET" | httpx -silent -td -server -title -status-code -cl -timeout 10 2>/dev/null || echo "")
+    HTTPX_OUTPUT=$(echo "$TARGET" | httpx -silent -td -server -title -status-code -cl -timeout 10 2>/dev/null || true)
     
     if [ -n "$HTTPX_OUTPUT" ]; then
         TECH=$(echo "$HTTPX_OUTPUT" | grep -oP '\[.*?\]' | tail -1 | tr -d '[]' || echo "")
@@ -97,7 +100,7 @@ if command -v httpx &> /dev/null; then
         echo -e "  ${Y}No response${NC}"
     fi
 else
-    HEADERS=$(curl -sI "https://$TARGET" 2>/dev/null || curl -sI "http://$TARGET" 2>/dev/null || echo "")
+    HEADERS=$(curl -sI "https://$TARGET" 2>/dev/null || curl -sI "http://$TARGET" 2>/dev/null || true)
     
     if [ -n "$HEADERS" ]; then
         STATUS=$(echo "$HEADERS" | head -1 | grep -oP '\d{3}' | head -1 || echo "")
@@ -113,22 +116,20 @@ else
 fi
 
 ############################
-# ROBOTS.TXT y SITEMAP.XML - CORREGIDO
+# ROBOTS.TXT y SITEMAP.XML
 ############################
 echo -e "\n[CONTENT DISCOVERY]"
 
-# Probar robots.txt - DETECCIÓN MEJORADA
+# Probar robots.txt
 ROBOTS_FOUND=false
 ROBOTS_URLS=("https://$TARGET/robots.txt" "http://$TARGET/robots.txt" "https://www.$TARGET/robots.txt" "http://www.$TARGET/robots.txt")
 ROBOTS_CONTENT=""
 
 for url in "${ROBOTS_URLS[@]}"; do
-    # Verificar primero el código de estado
     HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L -A "Mozilla/5.0" "$url" 2>/dev/null || echo "000")
     
     if [ "$HTTP_STATUS" = "200" ]; then
-        ROBOTS_CONTENT=$(curl -sL -A "Mozilla/5.0" "$url" 2>/dev/null)
-        # Verificar que el contenido tenga líneas válidas de robots.txt
+        ROBOTS_CONTENT=$(curl -sL -A "Mozilla/5.0" "$url" 2>/dev/null || true)
         if echo "$ROBOTS_CONTENT" | grep -qiE "^(user-agent|disallow|allow|sitemap| crawl-delay):" ; then
             ROBOTS_FOUND=true
             ROBOTS_URL="$url"
@@ -140,7 +141,6 @@ done
 if [ "$ROBOTS_FOUND" = true ]; then
     echo -e "  ${G}robots.txt encontrado${NC}"
     
-    # Extraer rutas de Disallow (excluyendo solo "/")
     DISALLOW_PATHS=$(echo "$ROBOTS_CONTENT" | grep -i '^disallow:' | cut -d: -f2- | sed 's/^[[:space:]]*//' | grep -v '^[[:space:]]*$' | grep -v '^/$' | head -10)
     
     if [ -n "$DISALLOW_PATHS" ]; then
@@ -155,14 +155,12 @@ else
     echo -e "  ${Y}robots.txt no encontrado${NC}"
 fi
 
-# Buscar sitemap - DETECCIÓN MEJORADA
+# Buscar sitemap
 SITEMAP_FOUND=false
 
-# Primero buscar sitemap en robots.txt si se encontró
 if [ "$ROBOTS_FOUND" = true ]; then
     SITEMAP_FROM_ROBOTS=$(echo "$ROBOTS_CONTENT" | grep -i '^sitemap:' | cut -d: -f2- | sed 's/^[[:space:]]*//' | head -1)
     if [ -n "$SITEMAP_FROM_ROBOTS" ]; then
-        # Verificar que el sitemap sea accesible
         SITEMAP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L -A "Mozilla/5.0" "$SITEMAP_FROM_ROBOTS" 2>/dev/null || echo "000")
         if [ "$SITEMAP_STATUS" = "200" ]; then
             SITEMAP_URL="$SITEMAP_FROM_ROBOTS"
@@ -171,7 +169,6 @@ if [ "$ROBOTS_FOUND" = true ]; then
     fi
 fi
 
-# Si no se encontró en robots.txt, probar URLs directas
 if [ "$SITEMAP_FOUND" = false ]; then
     SITEMAP_URLS=("https://$TARGET/sitemap.xml" "http://$TARGET/sitemap.xml" "https://www.$TARGET/sitemap.xml" "http://www.$TARGET/sitemap.xml")
     
@@ -200,7 +197,7 @@ COOKIE_HEADERS=""
 URLS_TO_TEST=("https://$TARGET" "http://$TARGET" "https://www.$TARGET" "http://www.$TARGET")
 
 for url in "${URLS_TO_TEST[@]}"; do
-    TEMP_HEADERS=$(curl -sL -I -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" "$url" 2>/dev/null | grep -i "^set-cookie:" || echo "")
+    TEMP_HEADERS=$(curl -sL -I -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" "$url" 2>/dev/null | grep -i "^set-cookie:" || true)
     if [ -n "$TEMP_HEADERS" ]; then
         COOKIE_HEADERS="$TEMP_HEADERS"
         break
@@ -209,7 +206,7 @@ done
 
 if [ -z "$COOKIE_HEADERS" ]; then
     for url in "${URLS_TO_TEST[@]}"; do
-        TEMP_HEADERS=$(curl -sL -D - -o /dev/null -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" "$url" 2>/dev/null | grep -i "^set-cookie:" || echo "")
+        TEMP_HEADERS=$(curl -sL -D - -o /dev/null -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" "$url" 2>/dev/null | grep -i "^set-cookie:" || true)
         if [ -n "$TEMP_HEADERS" ]; then
             COOKIE_HEADERS="$TEMP_HEADERS"
             break
@@ -250,9 +247,9 @@ fi
 # ESPERAR Y MOSTRAR RESULTADOS DE NMAP
 ############################
 echo -e "\n[PORT SCAN RESULTS]"
-wait $NMAP_PID 2>/dev/null
-NMAP_OUTPUT=$(cat /tmp/nmap_$.tmp 2>/dev/null || echo "")
-rm -f /tmp/nmap_$.tmp
+wait $NMAP_PID 2>/dev/null || true
+NMAP_OUTPUT=$(cat /tmp/nmap_$$.tmp 2>/dev/null || true)
+rm -f /tmp/nmap_$$.tmp
 
 if [ -n "$NMAP_OUTPUT" ] && echo "$NMAP_OUTPUT" | grep -q "open"; then
     printf "  ┌────────┬────────┬────────────────────────────────────────┐\n"
@@ -280,7 +277,7 @@ echo -e "\n[DOMAIN INFORMATION]"
 ROOT_DOMAIN=$(get_root_domain "$TARGET")
 
 if [ "$TARGET" = "$ROOT_DOMAIN" ]; then
-    WHOIS_DATA=$(whois "$ROOT_DOMAIN" 2>/dev/null || echo "")
+    WHOIS_DATA=$(whois "$ROOT_DOMAIN" 2>/dev/null || true)
 
     REGISTRAR=$(echo "$WHOIS_DATA" | grep -im 1 'registrar:' | cut -d: -f2- | xargs || echo "N/A")
     CREATED=$(echo "$WHOIS_DATA" | grep -im 1 'creation date:' | cut -d: -f2- | awk '{print $1}' | sed 's/T.*//' || echo "N/A")
