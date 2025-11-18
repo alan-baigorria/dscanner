@@ -77,5 +77,7 @@ para implementación técnica y optimización.
 
 
 # Ejemplo de salida:
+![dscanner1](https://github.com/user-attachments/assets/278f6819-c9dc-4a15-a9d5-1c26de78b6ce)
+
 <img width="756" height="559" alt="image" src="https://github.com/user-attachments/assets/2f261235-c396-424e-b47b-54eea76460bf" />
 
